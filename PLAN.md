@@ -6,11 +6,12 @@ A video hosting platform where users upload videos and the system generates adap
 
 ## Tech Stack
 
-- **Language:** Rust
+- **Runtime:** Bun
+- **Language:** TypeScript
 - **Database:** PostgreSQL
 - **Web server:** nginx (serves HLS static files)
-- **API server:** axum or actix-web
-- **Transcoding:** ffmpeg (via worker pool, async subprocess)
+- **API server:** Elysia (Bun native HTTP framework)
+- **Transcoding:** ffmpeg (via worker pool, Bun.spawn)
 - **Frontend player:** hls.js (Safari plays natively)
 
 ## How HLS Works
@@ -200,7 +201,7 @@ server {
     }
 
     location /api/ {
-        proxy_pass http://127.0.0.1:3000;  # Rust API server
+        proxy_pass http://127.0.0.1:3000;  # Elysia API server (Bun)
     }
 }
 ```
@@ -225,6 +226,7 @@ server {
 ### Transcoding
 
 - Worker pool for ffmpeg with configurable concurrency (e.g., max 2 concurrent transcodes)
+- Use `Bun.spawn` to run ffmpeg subprocesses asynchronously
 - Encode audio once at highest quality, then `-c:a copy` to each rendition
 - Use `-preset medium` as default (balance of speed and quality)
 - `-threads 0` for auto-detecting CPU cores
@@ -262,8 +264,48 @@ server {
 - Per-user upload limits (TODO)
 - Authentication (later concern)
 
+## Project Structure
+
+```
+src/
+├── index.ts              # Entry point, start Elysia server
+├── routes/
+│   ├── videos.ts         # Video upload, list, get, delete endpoints
+│   └── hls.ts            # Serve HLS playlists (if not using nginx)
+├── services/
+│   ├── transcode.ts      # ffmpeg worker pool & transcoding logic
+│   ├── storage.ts        # File storage operations
+│   └── database.ts       # PostgreSQL queries (using Bun's native pg driver)
+├── db/
+│   └── schema.sql        # Database schema
+└── utils/
+    └── ffmpeg.ts         # ffmpeg command builders
+```
+
+## Elysia Server (Bun)
+
+```typescript
+import { Elysia } from 'elysia'
+import { videoRoutes } from './routes/videos'
+
+const app = new Elysia()
+  .use(videoRoutes)
+  .listen(3000)
+
+console.log(`Server running at http://localhost:${app.server?.port}`)
+```
+
+### Key Bun Features Used
+
+- **Bun.spawn** — Run ffmpeg subprocesses with stream piping
+- **Bun.file** — Efficient file reading for uploads
+- **Bun.write** — Write transcoded segments to disk
+- **Bun postgres driver** — Native PostgreSQL connections (no npm dependency needed)
+- **Bun.serve** — Underlying HTTP server (used by Elysia)
+
 ### Performance
 
 - `sendfile on` in nginx for efficient static file serving
 - Segment caching: immutable .ts files can have aggressive cache headers
 - Concurrent uploads competing for CPU — job queue with concurrency limit
+- Bun's native TypeScript execution — no compile step needed
