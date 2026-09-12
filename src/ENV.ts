@@ -8,4 +8,4 @@ export const envSchema = t.Object({
   DB_NAME: t.String()
 })
 
-export const ENV = getSchemaValidator(envSchema)?.parse(process.env)
+export const ENV = getSchemaValidator(envSchema, {additionalProperties : true, coerce: true})?.parse(process.env)
