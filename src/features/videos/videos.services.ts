@@ -1,9 +1,3 @@
-// export function uploadVideo(video: File) {
-//   const { name, size } = video;
-//   const VIDEO_SIZE_LIMIT =
-//   if(size > )
-// }
-
 import { resolve } from "node:path";
 import type { Database } from "@/db";
 import { fetchVideos } from "./videos.repo";

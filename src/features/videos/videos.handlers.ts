@@ -1,7 +1,7 @@
 import type { Database } from "@/db";
 import type { UploadVideoBody } from "@/schemas/video.schema";
 import { getVideos, handleUploadVideo } from "./videos.services";
-import {resolve} from "node:path"
+
 
 
 export async function handleGetVideos({ db }: { db: Database }) {

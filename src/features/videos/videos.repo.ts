@@ -1,4 +1,3 @@
-import {  gt } from "drizzle-orm";
 import type {  Database } from "@/db";
 import { type NewVideo, videos } from "@/db/schema";
 
