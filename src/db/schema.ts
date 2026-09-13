@@ -14,5 +14,10 @@ export const videos = pgTable("videos", {
 }
 )
 
+export const job = pgTable("", {
+  job_id: integer().generatedByDefaultAsIdentity(),
+
+})
+
 export type NewVideo = typeof videos.$inferInsert
 export type Video = typeof videos.$inferSelect
