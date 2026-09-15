@@ -1,9 +1,8 @@
-import { randomUUIDv7 } from "bun"
-import { integer, pgTable, text, timestamp, uuid,varchar} from "drizzle-orm/pg-core"
+import { integer, jsonb, pgTable, text, timestamp, uuid,varchar} from "drizzle-orm/pg-core"
 
 
 export const videos = pgTable("videos", {
-  video_id: uuid().primaryKey().$default(()=>randomUUIDv7()),
+  video_id: uuid().primaryKey(),
   title: varchar({ length: 255 }).notNull(),
   description: text(),
   status: text().notNull(),
@@ -14,10 +13,15 @@ export const videos = pgTable("videos", {
 }
 )
 
-export const job = pgTable("", {
-  job_id: integer().generatedByDefaultAsIdentity(),
-
-})
+export const ffmpeg_jobs = pgTable("ffmpeg_jobs", {
+	job_id: integer().generatedByDefaultAsIdentity(),
+	status: varchar().notNull().default("pending"),
+	job_details: jsonb().notNull(),
+  created_at: timestamp().notNull().defaultNow(),
+});
 
 export type NewVideo = typeof videos.$inferInsert
 export type Video = typeof videos.$inferSelect
+
+export type FfmpegJob = typeof ffmpeg_jobs.$inferSelect
+export type NewFfmpegJob = typeof ffmpeg_jobs.$inferInsert
