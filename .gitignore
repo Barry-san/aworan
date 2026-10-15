@@ -43,3 +43,7 @@ package-lock.json
 
 #env
 .env
+
+# runtime media dirs
+/uploads
+/videos
