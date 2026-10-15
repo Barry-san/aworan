@@ -1,10 +1,13 @@
-import { probeVideo } from "@/lib/probe"
-import { RENDITIONS, type Rendition, ladderFor } from "@/lib/ffmpeg"
+import { probeVideo } from "@/lib/probe";
+import { RENDITIONS, ladderFor } from "@/lib/ffmpeg";
 
-export { ladderFor }
+export { ladderFor };
 
-export async function detectHasAudio(inputPath: string, signal?: AbortSignal): Promise<boolean> {
-  return (await probeVideo(inputPath, signal)).hasAudio
+export async function detectHasAudio(
+  inputPath: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  return (await probeVideo(inputPath, signal)).hasAudio;
 }
 
 export function buildFiltersAndArgs({
@@ -13,24 +16,24 @@ export function buildFiltersAndArgs({
 	heights,
 	hasAudio = true,
 }: {
-	inputPath: string
-	outputDir: string
-	heights: number[]
-	hasAudio?: boolean
+    inputPath: string;
+    outputDir: string;
+    heights: number[];
+    hasAudio?: boolean;
 }): { filterComplex: string; argv: string[] } {
 	const rends = heights.map((height) => {
-		const rendition = RENDITIONS[height]
-		if (!rendition) throw new Error(`Unsupported rendition height: ${height}p`)
-		return rendition
-	})
-	const n = rends.length
+    const rendition = RENDITIONS[height];
+    if (!rendition) throw new Error(`Unsupported rendition height: ${height}p`);
+    return rendition;
+  });
+  const n = rends.length;
 
-	const labels = rends.map((_, i) => `[v${i}]`)
-	const split = `[0:v]split=${n}${labels.join("")}`
+  const labels = rends.map((_, i) => `[v${i}]`);
+  const split = `[0:v]split=${n}${labels.join("")}`;
 	const scales = rends
 		.map((rendition, i) => `[v${i}]scale=-2:${rendition.height}[v${i}out]`)
-		.join(";")
-	const filterComplex = `${split};${scales}`
+    .join(";");
+  const filterComplex = `${split};${scales}`;
 
 	const argv: string[] = [
 		"ffmpeg",
@@ -41,7 +44,7 @@ export function buildFiltersAndArgs({
 		inputPath,
 		"-filter_complex",
 		filterComplex,
-	]
+  ];
 
 	rends.forEach((rendition, i) => {
 		argv.push(
@@ -55,19 +58,22 @@ export function buildFiltersAndArgs({
 			rendition.maxrate,
 			`-bufsize:v:${i}`,
 			rendition.bufsize,
-		)
-	})
+    );
+  });
 
 	if (hasAudio) {
-		for (let i = 0; i < n; i++) argv.push("-map", "a:0")
-		argv.push("-c:a", "aac", "-b:a", "128k")
+    for (let i = 0; i < n; i++) argv.push("-map", "a:0");
+    argv.push("-c:a", "aac", "-b:a", "128k");
 	}
 
-	argv.push("-g", "48", "-keyint_min", "48", "-sc_threshold", "0")
+  argv.push("-g", "48", "-keyint_min", "48", "-sc_threshold", "0");
 
 	const varStreamMap = rends
-		.map((rendition, i) => (hasAudio ? `v:${i},a:${i}` : `v:${i}`) + `,name:${rendition.height}p`)
-		.join(" ")
+    .map(
+      (rendition, i) =>
+        (hasAudio ? `v:${i},a:${i}` : `v:${i}`) + `,name:${rendition.height}p`,
+    )
+    .join(" ");
 
 	argv.push(
 		"-f",
@@ -85,9 +91,9 @@ export function buildFiltersAndArgs({
 		"-var_stream_map",
 		varStreamMap,
 		`${outputDir}/%v/playlist.m3u8`,
-	)
+  );
 
-	return { filterComplex, argv }
+  return { filterComplex, argv };
 }
 
 export function buildTranscodeForSource({
@@ -95,9 +101,13 @@ export function buildTranscodeForSource({
 	outputDir,
 	sourceHeight,
 }: {
-	inputPath: string
-	outputDir: string
-	sourceHeight: number
+    inputPath: string;
+    outputDir: string;
+    sourceHeight: number;
 }) {
-	return buildFiltersAndArgs({ inputPath, outputDir, heights: ladderFor(sourceHeight) })
+  return buildFiltersAndArgs({
+    inputPath,
+    outputDir,
+    heights: ladderFor(sourceHeight),
+  });
 }
