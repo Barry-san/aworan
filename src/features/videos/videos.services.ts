@@ -1,27 +1,139 @@
-import { rmSync } from "node:fs";
-import { resolve } from "node:path";
+import { basename } from "node:path";
+import { StatusCodes } from "http-status-codes";
 import type { Database } from "@/db";
+import { ENV } from "@/ENV";
 import { AppError } from "@/lib/error";
-import { createFfmpegJob, fetchVideos } from "./videos.repo";
+import { ladderFor } from "@/lib/ffmpeg";
+import { logger } from "@/lib/logger";
+import { storeUpload } from "@/lib/uploads";
+import { probeVideo } from "@/lib/probe";
+import { withUploadSlot } from "@/lib/upload-slots";
+import { MediaTimeoutError } from "@/lib/media-process";
+import type { UpdateVideoBody } from "@/schemas/video.schema";
+import {
+	createFfmpegJob,
+	createVideoEntry,
+	fetchVideo,
+	fetchVideoStatus,
+	fetchVideos,
+	fetchVideosByAuthor,
+	updateVideo,
+} from "./videos.repo";
 
-export async function getVideos(db: Database) {
-  const videos = await fetchVideos(db)
-  return videos;
+export async function getVideos(db: Database, { page }: { page?: number }) {
+	const offset = page ? ENV.PAGE_LIMIT * (page - 1) : 0;
+	const videos = await fetchVideos(db, offset);
+	return videos;
 }
 
-export async function handleUploadVideo(db: Database, { video }: { video: File }) {
-  const videoPath = resolve(process.cwd(), `uploads/${video.name}`)
-  await Bun.write(resolve(videoPath, `uploads/${video.name}`), video);
-  try {
-   await createFfmpegJob(db, {job_details: {videoPath}})
-  }
-  catch {
-    rmSync(videoPath, {recursive : true, force: true})
+export async function getMyVideos(
+	db: Database,
+	{ page, authorId }: { page?: number; authorId: string },
+) {
+	const offset = page ? ENV.PAGE_LIMIT * (page - 1) : 0;
+	return fetchVideosByAuthor(db, offset, authorId);
+}
+export async function getVideo(
+	db: Database,
+	{ video_id }: { video_id: string },
+) {
+	return fetchVideo(db, { video_id });
+}
 
-    throw new AppError({
-      message: "failed to create video processing job",
-      status: 400
-    })
-  }
-  return { videoPath, sizeInBytes: video.size, fileName: video.name }
+export async function uploadVideo(
+	db: Database,
+	{ video, authorId }: { video: File; authorId: string },
+) {
+	return withUploadSlot(async () => {
+		const fileName = basename(video.name);
+		const stored = await storeUpload(video);
+		const uploadPath = stored.path;
+		try {
+			const { height, durationSeconds } = await probeVideo(uploadPath).catch(
+				(error) => {
+					throw new AppError({
+						status: error instanceof MediaTimeoutError ? 408 : 422,
+						message:
+							error instanceof MediaTimeoutError
+								? "Video inspection timed out"
+								: "Invalid or unsupported video",
+					});
+				},
+			);
+
+			const { videoRow, job } = await db.transaction(async (tx) => {
+				const [videoRow] = await createVideoEntry(tx, {
+					title: fileName.slice(0, 255),
+					file_size_bytes: video.size,
+					status: "pending",
+					source_height: height,
+					duration_seconds: durationSeconds,
+					author_id: authorId,
+				});
+
+				const [job] = await createFfmpegJob(tx, {
+					video_id: videoRow.video_id,
+					source_path: uploadPath,
+					ladder: height ? ladderFor(height) : [360],
+				});
+				return { videoRow, job };
+			});
+
+			return {
+				videoId: videoRow.video_id,
+				jobId: job.job_id,
+				fileName,
+				sizeInBytes: video.size,
+				sourceHeight: height,
+				durationSeconds,
+			};
+		} catch (e) {
+			await stored.discard();
+			logger.info(e);
+			if (e instanceof AppError) throw e;
+			throw new AppError({
+				message: "failed to create video processing job",
+				status: 500,
+			});
+		}
+	});
+}
+
+export async function updateVideoData(
+	db: Database,
+	{
+		data,
+		id,
+		authorId,
+	}: { data: UpdateVideoBody; id: string; authorId: string },
+) {
+	const video = await fetchVideo(db, { video_id: id, author_id: authorId });
+	if (!video)
+		throw new AppError({
+			status: StatusCodes.NOT_FOUND,
+			message: "video not found",
+		});
+	if (data.title === undefined && data.description === undefined) {
+		throw new AppError({
+			status: StatusCodes.BAD_REQUEST,
+			message: "Provide a title or description",
+		});
+	}
+	const updateData = { ...data, updated_at: new Date() };
+	return updateVideo(db, id, updateData);
+}
+
+export { deleteVideo } from "./videos.deletion";
+
+export async function getVideoStatus(
+	db: Database,
+	{ jobId, authorId }: { jobId: number; authorId: string },
+) {
+	const job = await fetchVideoStatus(db, jobId, authorId);
+	if (!job)
+		throw new AppError({
+			status: StatusCodes.NOT_FOUND,
+			message: "job not found",
+		});
+	return job;
 }
