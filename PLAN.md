@@ -171,6 +171,7 @@ CREATE TABLE videos (
 |--------|-----------------------|------------------------------------|
 | POST   | /api/videos/upload    | Upload video file, start transcode |
 | GET    | /api/videos           | List videos                        |
+| POST   | /api/videos           | Create Video Record                |
 | GET    | /api/videos/:id       | Get video metadata                 |
 | DELETE | /api/videos/:id       | Delete video + all files           |
 | GET    | /videos/:id/master.m3u8 | Serve HLS master playlist (nginx) |
