@@ -39,11 +39,11 @@ export async function fetchVideosByAuthor(
 }
 
 export async function fetchVideo(
-	db: Database,
+	db: Pick<Database, "select">,
 	{ video_id, author_id }: { video_id: string; author_id?: string },
 ) {
 	const conditions = [eq(videos.video_id, video_id)];
-	if (author_id) conditions.push(eq(videos.author_id, author_id));
+	if (author_id !== undefined) conditions.push(eq(videos.author_id, author_id));
 	const [row] = await db
 		.select()
 		.from(videos)
@@ -68,8 +68,30 @@ export async function updateVideo(
 		.returning();
 }
 
-export async function deleteVideoRow(db: Database, video_id: string) {
-	return db.delete(videos).where(eq(videos.video_id, video_id));
+export async function deleteVideoRow(
+	db: Pick<Database, "delete">,
+	{ id, authorId }: { id: string; authorId: string },
+) {
+	return db
+		.delete(videos)
+		.where(and(eq(videos.video_id, id), eq(videos.author_id, authorId)))
+		.returning({ id: videos.video_id });
+}
+
+export async function cancelVideoJobs(
+	db: Pick<Database, "update">,
+	videoId: string,
+) {
+	return db
+		.update(ffmpegJobs)
+		.set({
+			status: "cancelled",
+			lease_token: null,
+			lease_expires_at: null,
+			finished_at: new Date(),
+		})
+		.where(eq(ffmpegJobs.video_id, videoId))
+		.returning({ source: ffmpegJobs.source_path });
 }
 
 export async function createFfmpegJob(

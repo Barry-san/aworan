@@ -5,11 +5,10 @@ import { authRoutes } from "./features/auth";
 import { videoRoutes } from "./features/videos";
 import { logger } from "./lib/logger";
 import { MAX_REQUEST_BYTES } from "./lib/media-config";
-import { testSite } from "./lib/test-site";
 
 const app = new Elysia({
 	serve: { maxRequestBodySize: MAX_REQUEST_BYTES },
-}).use(testSite);
+});
 
 app.use(openapi());
 app.use(

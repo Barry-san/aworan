@@ -5,14 +5,17 @@ import { ENV } from "@/ENV";
 import { AppError } from "@/lib/error";
 import { ladderFor } from "@/lib/ffmpeg";
 import { logger } from "@/lib/logger";
+import { createMediaCleanup } from "@/lib/media-cleanup";
 import { storeUpload } from "@/lib/uploads";
 import { probeVideo } from "@/lib/probe";
 import { withUploadSlot } from "@/lib/upload-slots";
 import { MediaTimeoutError } from "@/lib/media-process";
 import type { UpdateVideoBody } from "@/schemas/video.schema";
 import {
+	cancelVideoJobs,
 	createFfmpegJob,
 	createVideoEntry,
+	deleteVideoRow,
 	fetchVideo,
 	fetchVideoStatus,
 	fetchVideos,
@@ -123,7 +126,37 @@ export async function updateVideoData(
 	return updateVideo(db, id, updateData);
 }
 
-export { deleteVideo } from "./videos.deletion";
+export async function deleteVideo(
+	db: Database,
+	{ id, authorId }: { id: string; authorId: string },
+	root = process.cwd(),
+) {
+	const sources = await db.transaction(async (tx) => {
+		const video = await fetchVideo(tx, { video_id: id, author_id: authorId });
+		if (!video)
+			throw new AppError({
+				status: StatusCodes.NOT_FOUND,
+				message: "video not found",
+			});
+		// Lock jobs first, matching the worker's publication lock order. Clearing
+		// ownership before deleting rows fences every in-flight processing attempt.
+		const jobs = await cancelVideoJobs(tx, id);
+		const deleted = await deleteVideoRow(tx, { id, authorId });
+		if (!deleted.length)
+			throw new AppError({
+				status: StatusCodes.NOT_FOUND,
+				message: "video not found",
+			});
+		return jobs.map((job) => job.source);
+	});
+	// A file-system failure must not undo a committed deletion. The scheduled
+	// sweeper retries orphan cleanup, including output recreated by a dying worker.
+	await createMediaCleanup(db, root)
+		.deletedVideo(id, sources)
+		.catch((error) => {
+			logger.error({ err: error, videoId: id }, "Media cleanup deferred");
+		});
+}
 
 export async function getVideoStatus(
 	db: Database,

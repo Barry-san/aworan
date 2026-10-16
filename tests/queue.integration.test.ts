@@ -1,5 +1,6 @@
+import "./fixtures/env";
 import { createMediaCleanup, ORPHAN_GRACE_MS } from "../src/lib/media-cleanup";
-import { deleteVideo } from "../src/features/videos/videos.deletion";
+import { deleteVideo } from "../src/features/videos/videos.services";
 import { MAX_UPLOAD_BYTES, MAX_REQUEST_BYTES } from "../src/lib/media-config";
 import {
 	beforeAll,
@@ -71,6 +72,17 @@ integration("PostgreSQL migrations and job ownership", () => {
 			"UPDATE ffmpeg_jobs SET lease_expires_at = clock_timestamp() - interval '1 second' WHERE job_id=$1",
 			[jobId],
 		);
+	}
+
+	async function seedOwned(sourcePath?: string) {
+		await pool.query(
+			"INSERT INTO \"user\"(id,name,email) VALUES ('owner','Owner','owner@example.com')",
+		);
+		const seeded = await seed(sourcePath);
+		await pool.query("UPDATE videos SET author_id='owner' WHERE video_id=$1", [
+			seeded.id,
+		]);
+		return seeded;
 	}
 
 	test("fresh migrations create auth tables and enforce author references", async () => {
@@ -235,6 +247,82 @@ integration("PostgreSQL migrations and job ownership", () => {
 			expect(
 				(await pool.query("SELECT * FROM ffmpeg_jobs WHERE video_id=$1", [id]))
 					.rowCount,
+			).toBe(0);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	test("missing and repeated deletion return not found", async () => {
+		await expect(
+			deleteVideo(db, { id: crypto.randomUUID(), authorId: "owner" }),
+		).rejects.toMatchObject({ status: 404 });
+		const { id } = await seedOwned();
+		await deleteVideo(db, { id, authorId: "owner" });
+		await expect(
+			deleteVideo(db, { id, authorId: "owner" }),
+		).rejects.toMatchObject({
+			status: 404,
+		});
+	});
+
+	test("a deletion that removes no row rolls back job cancellation and preserves media", async () => {
+		const root = await mkdtemp(join(tmpdir(), "yt-delete-rollback-"));
+		await pool.query(`CREATE FUNCTION prevent_video_delete() RETURNS trigger
+			LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$`);
+		await pool.query(`CREATE TRIGGER prevent_video_delete BEFORE DELETE ON videos
+			FOR EACH ROW EXECUTE FUNCTION prevent_video_delete()`);
+		try {
+			const stored = await storeUpload(
+				new File(["media"], "video.mp4"),
+				join(root, "uploads"),
+			);
+			const { id } = await seedOwned(stored.path);
+			const job = (await queue.claim())!;
+			const output = join(root, "videos", id, job.lease_token, "master.m3u8");
+			await Bun.write(output, "partial");
+			await expect(
+				deleteVideo(db, { id, authorId: "owner" }, root),
+			).rejects.toMatchObject({ status: 404 });
+			expect(await queue.renew(job)).toBe(true);
+			expect(
+				(
+					await pool.query("SELECT video_id FROM videos WHERE video_id=$1", [
+						id,
+					])
+				).rowCount,
+			).toBe(1);
+			expect(await Bun.file(stored.path).exists()).toBe(true);
+			expect(await Bun.file(output).exists()).toBe(true);
+		} finally {
+			await pool.query("DROP TRIGGER prevent_video_delete ON videos");
+			await pool.query("DROP FUNCTION prevent_video_delete()");
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	test("cleanup failure leaves deletion committed for the sweeper to retry", async () => {
+		const root = await mkdtemp(join(tmpdir(), "yt-delete-cleanup-"));
+		try {
+			const { id } = await seedOwned();
+			// A file where the video directory should be makes cleanup fail with ENOTDIR.
+			await Bun.write(join(root, "videos"), "blocked directory");
+			await expect(
+				deleteVideo(db, { id, authorId: "owner" }, root),
+			).resolves.toBeUndefined();
+			expect(
+				(
+					await pool.query("SELECT video_id FROM videos WHERE video_id=$1", [
+						id,
+					])
+				).rowCount,
+			).toBe(0);
+			expect(
+				(
+					await pool.query("SELECT job_id FROM ffmpeg_jobs WHERE video_id=$1", [
+						id,
+					])
+				).rowCount,
 			).toBe(0);
 		} finally {
 			await rm(root, { recursive: true, force: true });

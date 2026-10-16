@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-test("status route and empty metadata patch validation", async () => {
+test("status, metadata validation, and authenticated deletion routing", async () => {
 	// Keep mocks in a separate process so integration tests use the actual services.
 	const proc = Bun.spawn(
 		[
@@ -18,13 +18,17 @@ test("status route and empty metadata patch validation", async () => {
 	]);
 	expect(stderr).toBe("");
 	expect(exit).toBe(0);
-	const [status, empty, update] = JSON.parse(stdout);
+	const [status, empty, update, deletion] = JSON.parse(stdout);
 	expect(status).toEqual({
 		status: 200,
 		body: { jobId: 1, authorId: "owner" },
 	});
 	expect(empty.status).toBe(422);
 	expect(update.status).toBe(200);
+	expect(deletion).toEqual({
+		status: 200,
+		body: { id: "00000000-0000-4000-8000-000000000000", authorId: "owner" },
+	});
 });
 
 test("production logger initializes without the development transport", async () => {

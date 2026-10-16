@@ -1,5 +1,22 @@
 # Elysia with Bun runtime
 
+## Continuous integration
+
+GitHub Actions runs `.github/workflows/ci.yml` on every push and pull request.
+You can also start it manually from the repository's **Actions** tab. It uses
+Bun 1.4.2 and installs dependencies from `bun.lock` with `--frozen-lockfile`.
+
+The **Lint** job runs `bun run lint` without modifying files. Use
+`bun run lint:fix` locally to apply available safe fixes.
+
+The **Tests** job installs FFmpeg (including ffprobe) and starts a temporary
+PostgreSQL 16 service. It sets `TEST_DATABASE_URL` so `bun run test` runs both
+unit and database integration tests. The integration tests apply migrations
+to their own temporary schema. No GitHub secrets are required.
+
+Commit and push the workflow, `package.json`, and this README to enable CI.
+View results in the **Actions** tab or the checks on a pull request.
+
 ## Getting Started
 To get started with this template, simply paste this command into your terminal:
 ```bash
